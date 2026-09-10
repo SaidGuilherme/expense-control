@@ -126,12 +126,21 @@ export default function StepSummary({ plan }: { plan: PlanDetail }) {
 
         <div className="card">
           <div className="card-head">
-            <h2>Gastos previstos</h2>
+            <div>
+              <h2>Gastos previstos</h2>
+              {plan.totalGoalContribution > 0 && (
+                <p className="tiny muted">
+                  inclui {formatMoney(plan.totalGoalContribution)} direcionados a metas
+                </p>
+              )}
+            </div>
             <span className="tabular secondary-ink">{formatMoney(plan.totalPlannedExpense)}</span>
           </div>
           <table className="data">
             <tbody>
-              {plan.categories.every((category) => category.expenses.length === 0) && (
+              {plan.categories.every(
+                (category) => category.expenses.length === 0 && category.goals.length === 0
+              ) && (
                 <tr>
                   <td className="muted">Nenhum gasto previsto lançado.</td>
                 </tr>
@@ -149,6 +158,22 @@ export default function StepSummary({ plan }: { plan: PlanDetail }) {
                       </span>
                     </td>
                     <td className="num">{formatMoney(expense.amount)}</td>
+                  </tr>
+                ))
+              )}
+              {plan.categories.flatMap((category) =>
+                category.goals.map((goal) => (
+                  <tr key={`goal-${goal.goalId}`}>
+                    <td>
+                      <span className="row" style={{ gap: 8 }}>
+                        <span className="swatch" style={{ background: category.color }} aria-hidden="true" />
+                        <span>
+                          {goal.goalName}
+                          <span className="tiny muted"> · meta · {category.categoryName}</span>
+                        </span>
+                      </span>
+                    </td>
+                    <td className="num">{formatMoney(goal.amount)}</td>
                   </tr>
                 ))
               )}

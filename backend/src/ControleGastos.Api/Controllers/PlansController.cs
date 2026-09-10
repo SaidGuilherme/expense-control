@@ -27,6 +27,25 @@ public class PlansController(PlanService plans) : ControllerBase
         return CreatedAtAction(nameof(Get), new { id = plan.Id }, plan);
     }
 
+    /// <summary>
+    /// Grava de uma vez os meses de um período — cada um já composto pelo
+    /// assistente (padrão do período + ajustes do mês). Meses que já existem são
+    /// preservados e listados em <c>skippedMonths</c>.
+    /// </summary>
+    [HttpPost("batch")]
+    public async Task<ActionResult<CreatePlanRangeResultDto>> CreateBatch(
+        [FromBody] CreatePlanBatchInput input, CancellationToken ct)
+        => Ok(await plans.CreateBatchAsync(input, ct));
+
+    /// <summary>
+    /// Edição em conjunto: substitui o conteúdo dos meses enviados (e cria os que
+    /// faltarem). Ao contrário do POST, aqui os meses existentes são sobrescritos.
+    /// </summary>
+    [HttpPut("batch")]
+    public async Task<ActionResult<ApplyPlanBatchResultDto>> ApplyBatch(
+        [FromBody] CreatePlanBatchInput input, CancellationToken ct)
+        => Ok(await plans.ApplyBatchAsync(input, ct));
+
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
@@ -48,6 +67,11 @@ public class PlansController(PlanService plans) : ControllerBase
     [HttpPut("{id:int}/expenses")]
     public async Task<ActionResult<PlanDetailDto>> SetExpenses(int id, [FromBody] PlannedExpensesInput input, CancellationToken ct)
         => Ok(await plans.SetExpensesAsync(id, input, ct));
+
+    /// <summary>Etapa 3 — substitui os aportes em metas do mês.</summary>
+    [HttpPut("{id:int}/goal-contributions")]
+    public async Task<ActionResult<PlanDetailDto>> SetGoalContributions(int id, [FromBody] GoalContributionsInput input, CancellationToken ct)
+        => Ok(await plans.SetGoalContributionsAsync(id, input, ct));
 
     /// <summary>Avança ou volta a etapa do assistente.</summary>
     [HttpPost("{id:int}/step")]

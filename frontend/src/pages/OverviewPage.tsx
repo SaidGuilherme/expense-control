@@ -100,7 +100,13 @@ export default function OverviewPage() {
             <Stat
               label="Saídas previstas no ano"
               value={formatMoney(overview.totalExpense)}
-              hint={perMonthHint(overview.averageMonthlyExpense)}
+              hint={
+                overview.totalGoalContribution > 0
+                  ? `${perMonthHint(overview.averageMonthlyExpense)} · ${formatMoney(
+                      overview.totalGoalContribution
+                    )} em metas`
+                  : perMonthHint(overview.averageMonthlyExpense)
+              }
             />
             <Stat
               label="Sobra prevista no ano"
@@ -218,6 +224,59 @@ export default function OverviewPage() {
               </div>
             </div>
           </div>
+
+          {overview.goals.length > 0 && (
+            <div className="card">
+              <div className="card-head">
+                <h2>Metas</h2>
+                <span className="tiny muted">
+                  {formatMoney(overview.totalGoalContribution)} direcionados em {overview.year}
+                </span>
+              </div>
+              <div className="card-pad goals-grid">
+                {overview.goals.map((goal) => (
+                  <div key={goal.id}>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span className="swatch" style={{ background: goal.categoryColor }} aria-hidden="true" />
+                      <span style={{ flex: 1, minWidth: 0 }}>{goal.name}</span>
+                      <span className="tabular small">{formatPercent(goal.progressPercent)}</span>
+                    </div>
+
+                    <div style={{ marginTop: 6 }}>
+                      <Meter
+                        ratio={goal.progressPercent / 100}
+                        color={
+                          goal.isAchieved
+                            ? 'var(--good)'
+                            : goal.isLate
+                              ? 'var(--critical)'
+                              : goal.categoryColor
+                        }
+                      />
+                    </div>
+
+                    <div className="row tiny" style={{ marginTop: 5 }}>
+                      <span className="muted tabular">
+                        {formatMoney(goal.contributedAmount)} de {formatMoney(goal.targetAmount)}
+                      </span>
+                      <span className="spacer" />
+                      {goal.isAchieved ? (
+                        <span style={{ color: 'var(--good-ink)', fontWeight: 600 }}>batida</span>
+                      ) : goal.isLate ? (
+                        <span style={{ color: 'var(--critical)', fontWeight: 600 }}>
+                          venceu em {goal.targetLabel}
+                        </span>
+                      ) : (
+                        <span className="muted">
+                          {formatMoney(goal.suggestedMonthlyAmount)}/mês até {goal.targetLabel}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </main>

@@ -2,7 +2,10 @@ using ControleGastos.Api.Domain;
 
 namespace ControleGastos.Api.Contracts;
 
-/// <summary>Um mês do ano, com ou sem planejamento criado.</summary>
+/// <summary>
+/// Um mês do ano, com ou sem planejamento criado. <c>PlannedExpense</c> já inclui
+/// os aportes em metas; <c>GoalContribution</c> isola só essa parte.
+/// </summary>
 public record MonthOverviewDto(
     int Month,
     string MonthName,
@@ -12,6 +15,7 @@ public record MonthOverviewDto(
     PlanStep? Step,
     decimal PlannedIncome,
     decimal PlannedExpense,
+    decimal GoalContribution,
     decimal Balance);
 
 /// <summary>Quanto uma categoria consome no ano inteiro.</summary>
@@ -39,5 +43,7 @@ public record YearOverviewDto(
     decimal AverageMonthlyBalance,
     decimal HighestExpenseMonthAmount,
     string? HighestExpenseMonthName,
+    decimal TotalGoalContribution,
     IReadOnlyList<MonthOverviewDto> Months,
-    IReadOnlyList<CategoryYearTotalDto> Categories);
+    IReadOnlyList<CategoryYearTotalDto> Categories,
+    IReadOnlyList<GoalDto> Goals);

@@ -13,6 +13,7 @@ var connectionString = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("Connection string 'Default' não configurada.");
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddScoped<GoalService>();
 builder.Services.AddScoped<PlanService>();
 
 builder.Services.AddControllers().AddJsonOptions(options =>
@@ -85,9 +86,15 @@ static async Task PrepareDatabaseAsync(WebApplication app)
             // Assim que o primeiro `dotnet ef migrations add` for gerado, a aplicação
             // passa a usar migrations automaticamente — nada mais muda aqui.
             if (db.Database.GetMigrations().Any())
+            {
                 await db.Database.MigrateAsync();
+            }
             else
+            {
                 await db.Database.EnsureCreatedAsync();
+                // EnsureCreated ignora banco já existente: completa o que faltar.
+                await SchemaUpdates.ApplyAsync(db);
+            }
 
             await DbSeeder.SeedAsync(db);
 

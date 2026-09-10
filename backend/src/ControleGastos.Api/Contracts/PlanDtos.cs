@@ -17,6 +17,45 @@ public record CreatePlanInput
     public int? CopyFromPlanId { get; init; }
 }
 
+/// <summary>
+/// Um mês já composto pelo cliente: o padrão do período com os ajustes daquele mês
+/// aplicados. O servidor só grava — a noção de "padrão" vive no assistente.
+/// </summary>
+public record BatchMonthInput
+{
+    [Range(2000, 2100)]
+    public int Year { get; init; }
+
+    [Range(1, 12)]
+    public int Month { get; init; }
+
+    public List<PlannedIncomeInput> Incomes { get; init; } = [];
+    public List<AllocationInput> Allocations { get; init; } = [];
+    public List<PlannedExpenseInput> Expenses { get; init; } = [];
+    public List<GoalContributionInput> GoalContributions { get; init; } = [];
+}
+
+/// <summary>
+/// Grava de uma vez todos os meses de um período. Meses que já têm planejamento
+/// são preservados, nunca sobrescritos.
+/// </summary>
+public record CreatePlanBatchInput
+{
+    public List<BatchMonthInput> Months { get; init; } = [];
+}
+
+/// <summary>Resultado da edição em conjunto: o que foi sobrescrito e o que foi criado.</summary>
+public record ApplyPlanBatchResultDto(
+    int UpdatedCount,
+    int CreatedCount,
+    IReadOnlyList<PlanSummaryDto> Plans);
+
+public record CreatePlanRangeResultDto(
+    int CreatedCount,
+    int SkippedCount,
+    IReadOnlyList<PlanSummaryDto> Created,
+    IReadOnlyList<string> SkippedMonths);
+
 public record PlanSummaryDto(
     int Id,
     int Year,
@@ -35,6 +74,11 @@ public record PlannedIncomeDto(int IncomeSourceId, string IncomeSourceName, deci
 
 public record PlannedExpenseDto(int ExpenseSourceId, string ExpenseSourceName, int CategoryId, string CategoryName, decimal Amount);
 
+/// <summary>
+/// Como uma categoria está no mês. <c>PlannedExpense</c> é o total comprometido —
+/// fontes de saída <b>mais</b> aportes em metas —, então <c>Difference</c> já
+/// desconta as metas do teto. <c>PlannedGoals</c> isola só a parte das metas.
+/// </summary>
 public record CategoryBreakdownDto(
     int CategoryId,
     string CategoryName,
@@ -42,8 +86,10 @@ public record CategoryBreakdownDto(
     decimal Percentage,
     decimal Budget,
     decimal PlannedExpense,
+    decimal PlannedGoals,
     decimal Difference,
-    IReadOnlyList<PlannedExpenseDto> Expenses);
+    IReadOnlyList<PlannedExpenseDto> Expenses,
+    IReadOnlyList<PlannedGoalDto> Goals);
 
 public record PlanDetailDto(
     int Id,
@@ -59,6 +105,7 @@ public record PlanDetailDto(
     decimal UnallocatedPercentage,
     decimal UnallocatedAmount,
     decimal TotalPlannedExpense,
+    decimal TotalGoalContribution,
     decimal Balance,
     DateTime CreatedAt,
     DateTime UpdatedAt);

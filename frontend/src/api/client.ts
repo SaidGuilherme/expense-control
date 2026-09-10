@@ -1,6 +1,11 @@
 import type {
+  ApplyPlanBatchResult,
+  BatchMonthPayload,
   Category,
+  CreatePlanRangeResult,
   ExpenseSource,
+  Goal,
+  GoalInput,
   IncomeSource,
   PlanDetail,
   PlanSummary,
@@ -84,6 +89,15 @@ export const api = {
     remove: (id: number) => request<void>(`/expense-sources/${id}`, { method: 'DELETE' })
   },
 
+  // ---------- metas ----------
+  goals: {
+    list: (includeInactive = false) => request<Goal[]>(`/goals?includeInactive=${includeInactive}`),
+    create: (input: GoalInput) => request<Goal>('/goals', { method: 'POST', body: body(input) }),
+    update: (id: number, input: GoalInput) =>
+      request<Goal>(`/goals/${id}`, { method: 'PUT', body: body(input) }),
+    remove: (id: number) => request<void>(`/goals/${id}`, { method: 'DELETE' })
+  },
+
   // ---------- resumo anual ----------
   overview: {
     get: (year?: number) =>
@@ -96,6 +110,14 @@ export const api = {
     get: (id: number) => request<PlanDetail>(`/plans/${id}`),
     create: (input: { year: number; month: number; copyFromPlanId?: number }) =>
       request<PlanDetail>('/plans', { method: 'POST', body: body(input) }),
+
+    /** Cria os meses de um período; meses existentes são preservados. */
+    createBatch: (months: BatchMonthPayload[]) =>
+      request<CreatePlanRangeResult>('/plans/batch', { method: 'POST', body: body({ months }) }),
+
+    /** Edição em conjunto: sobrescreve o conteúdo dos meses enviados. */
+    applyBatch: (months: BatchMonthPayload[]) =>
+      request<ApplyPlanBatchResult>('/plans/batch', { method: 'PUT', body: body({ months }) }),
     remove: (id: number) => request<void>(`/plans/${id}`, { method: 'DELETE' }),
 
     setIncomes: (id: number, items: { incomeSourceId: number; amount: number }[]) =>
@@ -106,6 +128,9 @@ export const api = {
 
     setExpenses: (id: number, items: { expenseSourceId: number; amount: number }[]) =>
       request<PlanDetail>(`/plans/${id}/expenses`, { method: 'PUT', body: body({ items }) }),
+
+    setGoalContributions: (id: number, items: { goalId: number; amount: number }[]) =>
+      request<PlanDetail>(`/plans/${id}/goal-contributions`, { method: 'PUT', body: body({ items }) }),
 
     setStep: (id: number, step: number) =>
       request<PlanDetail>(`/plans/${id}/step`, { method: 'POST', body: body({ step }) })

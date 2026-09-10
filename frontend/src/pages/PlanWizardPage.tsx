@@ -6,7 +6,7 @@ import StepIncomes from './steps/StepIncomes';
 import StepAllocation from './steps/StepAllocation';
 import StepExpenses from './steps/StepExpenses';
 import StepSummary from './steps/StepSummary';
-import { STEP_LABEL, STEP_NUMBER, STEP_ORDER, type Category, type ExpenseSource, type IncomeSource, type PlanDetail } from '../types';
+import { STEP_LABEL, STEP_NUMBER, STEP_ORDER, type Category, type ExpenseSource, type Goal, type IncomeSource, type PlanDetail } from '../types';
 
 export type Draft = Record<number, number>;
 
@@ -21,10 +21,12 @@ export default function PlanWizardPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [incomeSources, setIncomeSources] = useState<IncomeSource[]>([]);
   const [expenseSources, setExpenseSources] = useState<ExpenseSource[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
 
   const [incomeDraft, setIncomeDraft] = useState<Draft>({});
   const [allocationDraft, setAllocationDraft] = useState<Draft>({});
   const [expenseDraft, setExpenseDraft] = useState<Draft>({});
+  const [goalDraft, setGoalDraft] = useState<Draft>({});
 
   const [viewStep, setViewStep] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -49,18 +51,26 @@ export default function PlanWizardPage() {
     );
     setExpenseDraft(expenses);
 
+    const contributions: Draft = {};
+    next.categories.forEach((category) =>
+      category.goals.forEach((goal) => (contributions[goal.goalId] = goal.amount))
+    );
+    setGoalDraft(contributions);
+
     if (moveView) setViewStep(STEP_NUMBER[next.step]);
   }, []);
 
   const reloadCatalogs = useCallback(async () => {
-    const [cats, incomes, expenses] = await Promise.all([
+    const [cats, incomes, expenses, goalList] = await Promise.all([
       api.categories.list(),
       api.incomeSources.list(),
-      api.expenseSources.list()
+      api.expenseSources.list(),
+      api.goals.list()
     ]);
     setCategories(cats);
     setIncomeSources(incomes);
     setExpenseSources(expenses);
+    setGoals(goalList);
   }, []);
 
   useEffect(() => {
@@ -86,7 +96,11 @@ export default function PlanWizardPage() {
 
   const totalIncome = useMemo(() => sum(incomeDraft), [incomeDraft]);
   const totalAllocated = useMemo(() => sum(allocationDraft), [allocationDraft]);
-  const totalExpense = useMemo(() => sum(expenseDraft), [expenseDraft]);
+  // O aporte em meta ocupa o teto da categoria, então entra no total de saídas.
+  const totalExpense = useMemo(
+    () => sum(expenseDraft) + sum(goalDraft),
+    [expenseDraft, goalDraft]
+  );
 
   /** Persiste o rascunho da etapa que está aberta e devolve o plano atualizado. */
   const saveCurrentStep = useCallback(async (): Promise<PlanDetail> => {
@@ -109,18 +123,27 @@ export default function PlanWizardPage() {
             percentage
           }))
         );
-      case 3:
-        return api.plans.setExpenses(
+      case 3: {
+        // Duas listas na mesma etapa; a segunda resposta já traz o plano final.
+        await api.plans.setExpenses(
           plan.id,
           Object.entries(expenseDraft).map(([sourceId, amount]) => ({
             expenseSourceId: Number(sourceId),
             amount
           }))
         );
+        return api.plans.setGoalContributions(
+          plan.id,
+          Object.entries(goalDraft).map(([goalId, amount]) => ({
+            goalId: Number(goalId),
+            amount
+          }))
+        );
+      }
       default:
         return plan;
     }
-  }, [plan, viewStep, incomeDraft, allocationDraft, expenseDraft]);
+  }, [plan, viewStep, incomeDraft, allocationDraft, expenseDraft, goalDraft]);
 
   const blockingMessage = (): string | null => {
     if (viewStep === 1 && totalIncome <= 0) return 'Informe ao menos uma entrada para continuar.';
@@ -249,12 +272,15 @@ export default function PlanWizardPage() {
         <StepExpenses
           categories={categories}
           expenseSources={expenseSources}
+          goals={goals}
           allocation={allocationDraft}
           draft={expenseDraft}
+          goalDraft={goalDraft}
           totalIncome={totalIncome}
           totalExpense={totalExpense}
           disabled={busy}
           onChange={setExpenseDraft}
+          onGoalChange={setGoalDraft}
           onSourceCreated={reloadCatalogs}
         />
       )}

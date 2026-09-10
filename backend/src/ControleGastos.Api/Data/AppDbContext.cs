@@ -12,6 +12,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PlannedIncome> PlannedIncomes => Set<PlannedIncome>();
     public DbSet<CategoryAllocation> CategoryAllocations => Set<CategoryAllocation>();
     public DbSet<PlannedExpense> PlannedExpenses => Set<PlannedExpense>();
+    public DbSet<Goal> Goals => Set<Goal>();
+    public DbSet<GoalContribution> GoalContributions => Set<GoalContribution>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -75,6 +77,33 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(x => x.Category)
                 .WithMany(c => c.Allocations)
                 .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<Goal>(e =>
+        {
+            e.ToTable("goals");
+            e.Property(x => x.Name).HasMaxLength(80).IsRequired();
+            e.Property(x => x.TargetAmount).HasPrecision(18, 2);
+            e.HasIndex(x => x.Name).IsUnique();
+            e.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<GoalContribution>(e =>
+        {
+            e.ToTable("goal_contributions");
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.HasIndex(x => new { x.MonthlyPlanId, x.GoalId }).IsUnique();
+            e.HasOne(x => x.MonthlyPlan)
+                .WithMany(p => p.GoalContributions)
+                .HasForeignKey(x => x.MonthlyPlanId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Goal)
+                .WithMany(g => g.Contributions)
+                .HasForeignKey(x => x.GoalId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

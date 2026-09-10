@@ -3,18 +3,21 @@ import { api, ApiError } from '../../api/client';
 import { ErrorBanner, Meter, MoneyInput, Stat } from '../../components/ui';
 import DonutChart, { DonutLegend, type Slice } from '../../components/DonutChart';
 import { formatMoney, formatPercent } from '../../utils/format';
-import type { Category, ExpenseSource } from '../../types';
+import type { Category, ExpenseSource, Goal } from '../../types';
 import type { Draft } from '../PlanWizardPage';
 
 interface Props {
   categories: Category[];
   expenseSources: ExpenseSource[];
+  goals: Goal[];
   allocation: Draft;
   draft: Draft;
+  goalDraft: Draft;
   totalIncome: number;
   totalExpense: number;
   disabled: boolean;
   onChange: (draft: Draft) => void;
+  onGoalChange: (draft: Draft) => void;
   onSourceCreated: () => Promise<void>;
 }
 
@@ -23,12 +26,15 @@ const round2 = (value: number) => Math.round(value * 100) / 100;
 export default function StepExpenses({
   categories,
   expenseSources,
+  goals,
   allocation,
   draft,
+  goalDraft,
   totalIncome,
   totalExpense,
   disabled,
   onChange,
+  onGoalChange,
   onSourceCreated
 }: Props) {
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +42,7 @@ export default function StepExpenses({
   const [creatingIn, setCreatingIn] = useState<number | null>(null);
 
   const setAmount = (sourceId: number, amount: number) => onChange({ ...draft, [sourceId]: amount });
+  const setGoalAmount = (goalId: number, amount: number) => onGoalChange({ ...goalDraft, [goalId]: amount });
 
   const blocks = useMemo(() => {
     const sourcesByCategory = new Map<number, ExpenseSource[]>();
@@ -45,23 +52,40 @@ export default function StepExpenses({
       sourcesByCategory.set(source.categoryId, list);
     });
 
+    const goalsByCategory = new Map<number, Goal[]>();
+    goals.forEach((goal) => {
+      const list = goalsByCategory.get(goal.categoryId) ?? [];
+      list.push(goal);
+      goalsByCategory.set(goal.categoryId, list);
+    });
+
     return categories
       .map((category) => {
         const percentage = allocation[category.id] ?? 0;
         const sources = sourcesByCategory.get(category.id) ?? [];
-        const planned = round2(sources.reduce((total, source) => total + (draft[source.id] ?? 0), 0));
+        const categoryGoals = goalsByCategory.get(category.id) ?? [];
+
+        // O aporte em meta ocupa o mesmo teto das fontes de saída.
+        const plannedGoals = round2(
+          categoryGoals.reduce((total, goal) => total + (goalDraft[goal.id] ?? 0), 0)
+        );
+        const planned = round2(
+          sources.reduce((total, source) => total + (draft[source.id] ?? 0), 0) + plannedGoals
+        );
 
         return {
           category,
           percentage,
           sources,
+          goals: categoryGoals,
           budget: round2((totalIncome * percentage) / 100),
-          planned
+          planned,
+          plannedGoals
         };
       })
       .filter((block) => block.percentage > 0 || block.planned > 0)
       .sort((a, b) => b.percentage - a.percentage);
-  }, [categories, expenseSources, allocation, draft, totalIncome]);
+  }, [categories, expenseSources, goals, allocation, draft, goalDraft, totalIncome]);
 
   const slices = useMemo<Slice[]>(
     () =>
@@ -108,7 +132,7 @@ export default function StepExpenses({
           </div>
         )}
 
-        {blocks.map(({ category, percentage, sources, budget, planned }) => {
+        {blocks.map(({ category, percentage, sources, goals: categoryGoals, budget, planned, plannedGoals }) => {
           const left = round2(budget - planned);
           const over = left < 0;
 
@@ -127,7 +151,10 @@ export default function StepExpenses({
                     color={over ? 'var(--critical)' : category.color}
                   />
                   <div className="row tiny" style={{ marginTop: 6 }}>
-                    <span className="muted">Previsto {formatMoney(planned)}</span>
+                    <span className="muted">
+                      Previsto {formatMoney(planned)}
+                      {plannedGoals > 0 && ` · ${formatMoney(plannedGoals)} em metas`}
+                    </span>
                     <span className="spacer" />
                     <span style={{ color: over ? 'var(--critical)' : 'var(--good-ink)', fontWeight: 600 }}>
                       {over ? `${formatMoney(Math.abs(left))} acima do teto` : `${formatMoney(left)} disponível`}
@@ -163,6 +190,43 @@ export default function StepExpenses({
                       </button>
                     </div>
                   ))
+                )}
+
+                {categoryGoals.length > 0 && (
+                  <>
+                    <div className="subhead">Metas</div>
+                    {categoryGoals.map((goal) => (
+                      <div className="goal-row" key={goal.id}>
+                        <div className="name" style={{ minWidth: 0 }}>
+                          <span
+                            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          >
+                            {goal.name}
+                          </span>
+                        </div>
+                        <MoneyInput
+                          value={goalDraft[goal.id] ?? 0}
+                          onChange={(value) => setGoalAmount(goal.id, value)}
+                          ariaLabel={`Valor direcionado para ${goal.name}`}
+                          disabled={disabled}
+                        />
+                        <div className="meta">
+                          <span>
+                            {formatMoney(goal.contributedAmount)} de {formatMoney(goal.targetAmount)} · prazo{' '}
+                            {goal.targetLabel}
+                          </span>
+                          <span className="spacer" />
+                          {goal.isAchieved ? (
+                            <span style={{ color: 'var(--good-ink)', fontWeight: 600 }}>meta batida</span>
+                          ) : goal.isLate ? (
+                            <span style={{ color: 'var(--critical)', fontWeight: 600 }}>prazo vencido</span>
+                          ) : (
+                            <span>sugerido {formatMoney(goal.suggestedMonthlyAmount)}/mês</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </>
                 )}
 
                 <div className="add-inline">

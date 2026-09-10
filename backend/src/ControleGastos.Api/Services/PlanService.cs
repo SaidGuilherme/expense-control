@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ControleGastos.Api.Services;
 
 /// <summary>Regras do assistente de planejamento mensal.</summary>
-public class PlanService(AppDbContext db)
+public class PlanService(AppDbContext db, GoalService goals)
 {
     private static readonly string[] MonthNames =
     [
@@ -37,21 +37,29 @@ public class PlanService(AppDbContext db)
             .Include(p => p.Incomes)
             .Include(p => p.Allocations)
             .Include(p => p.Expenses)
+            .Include(p => p.GoalContributions)
             .OrderByDescending(p => p.Year).ThenByDescending(p => p.Month)
             .ToListAsync(ct);
 
-        return plans.Select(p =>
-        {
-            var totalIncome = p.Incomes.Sum(i => i.Amount);
-            var totalExpense = p.Expenses.Sum(e => e.Amount);
-            return new PlanSummaryDto(
-                p.Id, p.Year, p.Month, LabelFor(p.Year, p.Month), p.Step,
-                totalIncome,
-                p.Allocations.Sum(a => a.Percentage),
-                totalExpense,
-                totalIncome - totalExpense,
-                p.UpdatedAt);
-        }).ToList();
+        return plans.Select(ToSummary).ToList();
+    }
+
+    private static PlanSummaryDto ToSummary(MonthlyPlan plan)
+    {
+        var totalIncome = plan.Incomes.Sum(i => i.Amount);
+        var totalExpense = plan.Expenses.Sum(e => e.Amount) + plan.GoalContributions.Sum(c => c.Amount);
+
+        return new PlanSummaryDto(
+            plan.Id,
+            plan.Year,
+            plan.Month,
+            LabelFor(plan.Year, plan.Month),
+            plan.Step,
+            totalIncome,
+            plan.Allocations.Sum(a => a.Percentage),
+            totalExpense,
+            totalIncome - totalExpense,
+            plan.UpdatedAt);
     }
 
     public async Task<PlanDetailDto> GetDetailAsync(int planId, CancellationToken ct)
@@ -83,6 +91,7 @@ public class PlanService(AppDbContext db)
             .AsNoTracking()
             .Include(p => p.Incomes)
             .Include(p => p.Expenses)
+            .Include(p => p.GoalContributions)
             .Where(p => p.Year == targetYear)
             .ToListAsync(ct);
 
@@ -95,16 +104,17 @@ public class PlanService(AppDbContext db)
             {
                 months.Add(new MonthOverviewDto(
                     month, MonthNames[month - 1], ShortMonthNames[month - 1],
-                    false, null, null, 0m, 0m, 0m));
+                    false, null, null, 0m, 0m, 0m, 0m));
                 continue;
             }
 
             var income = plan.Incomes.Sum(i => i.Amount);
-            var expense = plan.Expenses.Sum(e => e.Amount);
+            var contributions = plan.GoalContributions.Sum(c => c.Amount);
+            var expense = plan.Expenses.Sum(e => e.Amount) + contributions;
 
             months.Add(new MonthOverviewDto(
                 month, MonthNames[month - 1], ShortMonthNames[month - 1],
-                true, plan.Id, plan.Step, income, expense, income - expense));
+                true, plan.Id, plan.Step, income, expense, contributions, income - expense));
         }
 
         var plannedMonths = months.Where(m => m.HasPlan).ToList();
@@ -117,14 +127,25 @@ public class PlanService(AppDbContext db)
 
         var expenseSources = await db.ExpenseSources.AsNoTracking().ToDictionaryAsync(s => s.Id, ct);
         var categories = await db.Categories.AsNoTracking().ToDictionaryAsync(c => c.Id, ct);
+        var goalCategories = await db.Goals.AsNoTracking().ToDictionaryAsync(g => g.Id, g => g.CategoryId, ct);
 
-        var categoryTotals = plans
+        // Fontes de saída e aportes em metas caem na mesma categoria.
+        var committed = plans
             .SelectMany(p => p.Expenses)
             .Select(e => new
             {
                 e.Amount,
                 CategoryId = expenseSources.GetValueOrDefault(e.ExpenseSourceId)?.CategoryId ?? 0
             })
+            .Concat(plans
+                .SelectMany(p => p.GoalContributions)
+                .Select(c => new
+                {
+                    c.Amount,
+                    CategoryId = goalCategories.GetValueOrDefault(c.GoalId)
+                }));
+
+        var categoryTotals = committed
             .Where(x => x.CategoryId != 0)
             .GroupBy(x => x.CategoryId)
             .Select(group =>
@@ -161,8 +182,10 @@ public class PlanService(AppDbContext db)
             PerMonth(totalIncome - totalExpense),
             peak?.PlannedExpense ?? 0m,
             peak?.MonthName,
+            plannedMonths.Sum(m => m.GoalContribution),
             months,
-            categoryTotals);
+            categoryTotals,
+            await goals.ListAsync(includeInactive: false, ct));
     }
 
     // ------------------------------------------------------------------
@@ -191,12 +214,244 @@ public class PlanService(AppDbContext db)
 
             foreach (var e in source.Expenses)
                 plan.Expenses.Add(new PlannedExpense { ExpenseSourceId = e.ExpenseSourceId, Amount = e.Amount });
+
+            foreach (var c in source.GoalContributions)
+                plan.GoalContributions.Add(new GoalContribution { GoalId = c.GoalId, Amount = c.Amount });
         }
 
         db.MonthlyPlans.Add(plan);
         await db.SaveChangesAsync(ct);
 
         return await GetDetailAsync(plan.Id, ct);
+    }
+
+    /// <summary>Máximo de meses gravados de uma vez — evita um clique gerar anos de planejamento.</summary>
+    private const int MaxRangeMonths = 36;
+
+    /// <summary>
+    /// Grava de uma vez os meses de um período. O cliente manda cada mês já
+    /// composto (padrão do período + ajustes daquele mês); aqui só se valida e
+    /// persiste. Meses que já têm planejamento são preservados e devolvidos na
+    /// lista de pulados — nunca sobrescritos.
+    /// </summary>
+    public async Task<CreatePlanRangeResultDto> CreateBatchAsync(CreatePlanBatchInput input, CancellationToken ct)
+    {
+        var months = input.Months;
+
+        if (months.Count == 0)
+            throw new DomainException("Nenhum mês foi enviado.");
+
+        if (months.Count > MaxRangeMonths)
+            throw new DomainException($"São {months.Count} meses; o máximo por vez é {MaxRangeMonths}.");
+
+        var seen = new HashSet<int>();
+        foreach (var month in months)
+        {
+            if (!seen.Add(month.Year * 12 + (month.Month - 1)))
+                throw new DomainException($"O mês {LabelFor(month.Year, month.Month)} foi enviado mais de uma vez.");
+        }
+
+        // Uma checagem de referências para o lote inteiro, em vez de uma por mês.
+        await EnsureBatchReferencesAsync(months, ct);
+
+        var years = months.Select(m => m.Year).Distinct().ToList();
+        var taken = await db.MonthlyPlans
+            .AsNoTracking()
+            .Where(p => years.Contains(p.Year))
+            .Select(p => new { p.Year, p.Month })
+            .ToListAsync(ct);
+
+        var takenIndexes = taken.Select(x => x.Year * 12 + (x.Month - 1)).ToHashSet();
+
+        var created = new List<MonthlyPlan>();
+        var skipped = new List<string>();
+
+        foreach (var month in months.OrderBy(m => m.Year).ThenBy(m => m.Month))
+        {
+            var label = LabelFor(month.Year, month.Month);
+
+            if (takenIndexes.Contains(month.Year * 12 + (month.Month - 1)))
+            {
+                skipped.Add(label);
+                continue;
+            }
+
+            var incomes = Deduplicate(month.Incomes, x => x.IncomeSourceId, "fonte de entrada");
+            var allocations = Deduplicate(month.Allocations, x => x.CategoryId, "categoria");
+            var expenses = Deduplicate(month.Expenses, x => x.ExpenseSourceId, "fonte de saída");
+            var contributions = Deduplicate(month.GoalContributions, x => x.GoalId, "meta");
+
+            var totalPercentage = allocations.Values.Sum(a => a.Percentage);
+            if (totalPercentage > 100m + PercentTolerance)
+                throw new DomainException(
+                    $"Em {label} a soma das porcentagens é {totalPercentage:0.##}% e não pode passar de 100%.");
+
+            // Vem do assistente com as quatro etapas preenchidas.
+            var plan = new MonthlyPlan { Year = month.Year, Month = month.Month, Step = PlanStep.Concluido };
+
+            foreach (var (sourceId, item) in incomes.Where(x => x.Value.Amount > 0))
+                plan.Incomes.Add(new PlannedIncome { IncomeSourceId = sourceId, Amount = item.Amount });
+
+            foreach (var (categoryId, item) in allocations.Where(x => x.Value.Percentage > 0))
+                plan.Allocations.Add(new CategoryAllocation { CategoryId = categoryId, Percentage = item.Percentage });
+
+            foreach (var (sourceId, item) in expenses.Where(x => x.Value.Amount > 0))
+                plan.Expenses.Add(new PlannedExpense { ExpenseSourceId = sourceId, Amount = item.Amount });
+
+            foreach (var (goalId, item) in contributions.Where(x => x.Value.Amount > 0))
+                plan.GoalContributions.Add(new GoalContribution { GoalId = goalId, Amount = item.Amount });
+
+            db.MonthlyPlans.Add(plan);
+            created.Add(plan);
+        }
+
+        if (created.Count > 0)
+            await db.SaveChangesAsync(ct);
+
+        return new CreatePlanRangeResultDto(
+            created.Count,
+            skipped.Count,
+            created.Select(ToSummary).ToList(),
+            skipped);
+    }
+
+    /// <summary>
+    /// Edição em conjunto: substitui o conteúdo de cada mês enviado. Diferente do
+    /// POST, aqui os meses existentes <b>são</b> sobrescritos — é o efeito
+    /// pretendido de aplicar um padrão a vários meses de uma vez. Meses que ainda
+    /// não existem são criados.
+    /// </summary>
+    public async Task<ApplyPlanBatchResultDto> ApplyBatchAsync(CreatePlanBatchInput input, CancellationToken ct)
+    {
+        var months = input.Months;
+
+        if (months.Count == 0)
+            throw new DomainException("Nenhum mês foi enviado.");
+
+        if (months.Count > MaxRangeMonths)
+            throw new DomainException($"São {months.Count} meses; o máximo por vez é {MaxRangeMonths}.");
+
+        var seen = new HashSet<int>();
+        foreach (var month in months)
+        {
+            if (!seen.Add(month.Year * 12 + (month.Month - 1)))
+                throw new DomainException($"O mês {LabelFor(month.Year, month.Month)} foi enviado mais de uma vez.");
+        }
+
+        await EnsureBatchReferencesAsync(months, ct);
+
+        var years = months.Select(m => m.Year).Distinct().ToList();
+        var plans = await db.MonthlyPlans
+            .Include(p => p.Incomes)
+            .Include(p => p.Allocations)
+            .Include(p => p.Expenses)
+            .Include(p => p.GoalContributions)
+            .Where(p => years.Contains(p.Year))
+            .ToListAsync(ct);
+
+        var byIndex = plans.ToDictionary(p => p.Year * 12 + (p.Month - 1));
+
+        var touched = new List<MonthlyPlan>();
+        var updated = 0;
+        var created = 0;
+
+        foreach (var month in months.OrderBy(m => m.Year).ThenBy(m => m.Month))
+        {
+            var label = LabelFor(month.Year, month.Month);
+
+            var incomes = Deduplicate(month.Incomes, x => x.IncomeSourceId, "fonte de entrada");
+            var allocations = Deduplicate(month.Allocations, x => x.CategoryId, "categoria");
+            var expenses = Deduplicate(month.Expenses, x => x.ExpenseSourceId, "fonte de saída");
+            var contributions = Deduplicate(month.GoalContributions, x => x.GoalId, "meta");
+
+            var totalPercentage = allocations.Values.Sum(a => a.Percentage);
+            if (totalPercentage > 100m + PercentTolerance)
+                throw new DomainException(
+                    $"Em {label} a soma das porcentagens é {totalPercentage:0.##}% e não pode passar de 100%.");
+
+            var index = month.Year * 12 + (month.Month - 1);
+
+            if (!byIndex.TryGetValue(index, out var plan))
+            {
+                plan = new MonthlyPlan { Year = month.Year, Month = month.Month };
+                db.MonthlyPlans.Add(plan);
+                byIndex[index] = plan;
+                created++;
+            }
+            else
+            {
+                updated++;
+            }
+
+            // O mesmo merge das etapas do assistente: atualiza, remove e insere.
+            // Nada de apagar tudo e reinserir, que esbarraria nos índices únicos.
+            Sync(
+                plan.Incomes, incomes,
+                existing => existing.IncomeSourceId,
+                (sourceId, item) => new PlannedIncome { IncomeSourceId = sourceId, Amount = item.Amount },
+                (existing, item) => existing.Amount = item.Amount,
+                item => item.Amount <= 0,
+                db.PlannedIncomes);
+
+            Sync(
+                plan.Allocations, allocations,
+                existing => existing.CategoryId,
+                (categoryId, item) => new CategoryAllocation { CategoryId = categoryId, Percentage = item.Percentage },
+                (existing, item) => existing.Percentage = item.Percentage,
+                item => item.Percentage <= 0,
+                db.CategoryAllocations);
+
+            Sync(
+                plan.Expenses, expenses,
+                existing => existing.ExpenseSourceId,
+                (sourceId, item) => new PlannedExpense { ExpenseSourceId = sourceId, Amount = item.Amount },
+                (existing, item) => existing.Amount = item.Amount,
+                item => item.Amount <= 0,
+                db.PlannedExpenses);
+
+            Sync(
+                plan.GoalContributions, contributions,
+                existing => existing.GoalId,
+                (goalId, item) => new GoalContribution { GoalId = goalId, Amount = item.Amount },
+                (existing, item) => existing.Amount = item.Amount,
+                item => item.Amount <= 0,
+                db.GoalContributions);
+
+            plan.Step = PlanStep.Concluido;
+            plan.UpdatedAt = DateTime.UtcNow;
+            touched.Add(plan);
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        return new ApplyPlanBatchResultDto(
+            updated,
+            created,
+            touched.OrderByDescending(p => p.Year).ThenByDescending(p => p.Month).Select(ToSummary).ToList());
+    }
+
+    /// <summary>Confere de uma vez todas as referências citadas por um lote de meses.</summary>
+    private async Task EnsureBatchReferencesAsync(List<BatchMonthInput> months, CancellationToken ct)
+    {
+        await EnsureExistsAsync(
+            db.IncomeSources.Select(s => s.Id),
+            months.SelectMany(m => m.Incomes).Select(i => i.IncomeSourceId).Distinct(),
+            "Fonte de entrada", ct);
+
+        await EnsureExistsAsync(
+            db.Categories.Select(c => c.Id),
+            months.SelectMany(m => m.Allocations).Select(a => a.CategoryId).Distinct(),
+            "Categoria", ct);
+
+        await EnsureExistsAsync(
+            db.ExpenseSources.Select(s => s.Id),
+            months.SelectMany(m => m.Expenses).Select(e => e.ExpenseSourceId).Distinct(),
+            "Fonte de saída", ct);
+
+        await EnsureExistsAsync(
+            db.Goals.Select(g => g.Id),
+            months.SelectMany(m => m.GoalContributions).Select(c => c.GoalId).Distinct(),
+            "Meta", ct);
     }
 
     public async Task DeleteAsync(int planId, CancellationToken ct)
@@ -285,6 +540,31 @@ public class PlanService(AppDbContext db)
     }
 
     // ------------------------------------------------------------------
+    // Etapa 3 — aportes em metas (ocupam o teto da categoria da meta)
+    // ------------------------------------------------------------------
+
+    public async Task<PlanDetailDto> SetGoalContributionsAsync(
+        int planId, GoalContributionsInput input, CancellationToken ct)
+    {
+        var plan = await LoadAsync(planId, tracking: true, ct);
+
+        var items = Deduplicate(input.Items, x => x.GoalId, "meta");
+        await EnsureExistsAsync(db.Goals.Select(g => g.Id), items.Keys, "Meta", ct);
+
+        Sync(
+            plan.GoalContributions,
+            items,
+            existing => existing.GoalId,
+            (goalId, item) => new GoalContribution { MonthlyPlanId = plan.Id, GoalId = goalId, Amount = item.Amount },
+            (existing, item) => existing.Amount = item.Amount,
+            item => item.Amount <= 0,
+            db.GoalContributions);
+
+        await TouchAndSaveAsync(plan, ct);
+        return await BuildDetailAsync(plan, ct);
+    }
+
+    // ------------------------------------------------------------------
     // Navegação entre etapas
     // ------------------------------------------------------------------
 
@@ -323,6 +603,7 @@ public class PlanService(AppDbContext db)
             .Include(p => p.Incomes)
             .Include(p => p.Allocations)
             .Include(p => p.Expenses)
+            .Include(p => p.GoalContributions)
             .AsQueryable();
 
         if (!tracking) query = query.AsNoTracking();
@@ -423,8 +704,35 @@ public class PlanService(AppDbContext db)
             .GroupBy(e => e.CategoryId)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(e => e.Amount).ToList());
 
+        // Aportes em metas entram na categoria da meta, ao lado das fontes de saída.
+        var goalsById = await db.Goals.AsNoTracking().ToDictionaryAsync(g => g.Id, ct);
+        var contributedByGoal = await goals.ContributedByGoalAsync(ct);
+
+        var goalsByCategory = plan.GoalContributions
+            .Select(c =>
+            {
+                var goal = goalsById.GetValueOrDefault(c.GoalId);
+                var contributed = contributedByGoal.GetValueOrDefault(c.GoalId);
+                var target = goal?.TargetAmount ?? 0m;
+
+                return new PlannedGoalDto(
+                    c.GoalId,
+                    goal?.Name ?? "(meta removida)",
+                    goal?.CategoryId ?? 0,
+                    c.Amount,
+                    target,
+                    goal is null ? "—" : LabelFor(goal.TargetYear, goal.TargetMonth),
+                    contributed,
+                    target <= 0m
+                        ? 0m
+                        : Math.Round(Math.Min(100m, contributed / target * 100m), 2, MidpointRounding.AwayFromZero));
+            })
+            .GroupBy(g => g.CategoryId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.Amount).ToList());
+
         var categoryIds = plan.Allocations.Select(a => a.CategoryId)
             .Union(expensesByCategory.Keys.Where(id => id != 0))
+            .Union(goalsByCategory.Keys.Where(id => id != 0))
             .Distinct()
             .ToList();
 
@@ -434,10 +742,17 @@ public class PlanService(AppDbContext db)
                 var category = categories.GetValueOrDefault(id);
                 var percentage = plan.Allocations.FirstOrDefault(a => a.CategoryId == id)?.Percentage ?? 0m;
                 var budget = Math.Round(totalIncome * percentage / 100m, 2, MidpointRounding.AwayFromZero);
-                var expenses = expensesByCategory.TryGetValue(id, out var found)
-                    ? found
+
+                var expenses = expensesByCategory.TryGetValue(id, out var foundExpenses)
+                    ? foundExpenses
                     : new List<PlannedExpenseDto>();
-                var planned = expenses.Sum(e => e.Amount);
+
+                var categoryGoals = goalsByCategory.TryGetValue(id, out var foundGoals)
+                    ? foundGoals
+                    : new List<PlannedGoalDto>();
+
+                var plannedGoals = categoryGoals.Sum(g => g.Amount);
+                var planned = expenses.Sum(e => e.Amount) + plannedGoals;
 
                 return new CategoryBreakdownDto(
                     id,
@@ -446,8 +761,10 @@ public class PlanService(AppDbContext db)
                     percentage,
                     budget,
                     planned,
+                    plannedGoals,
                     budget - planned,
-                    expenses);
+                    expenses,
+                    categoryGoals);
             })
             .OrderByDescending(c => c.Percentage)
             .ThenByDescending(c => c.PlannedExpense)
@@ -472,6 +789,7 @@ public class PlanService(AppDbContext db)
             unallocatedPercentage,
             Math.Round(totalIncome * unallocatedPercentage / 100m, 2, MidpointRounding.AwayFromZero),
             totalPlannedExpense,
+            breakdown.Sum(c => c.PlannedGoals),
             totalIncome - totalPlannedExpense,
             plan.CreatedAt,
             plan.UpdatedAt);

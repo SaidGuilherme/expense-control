@@ -1,5 +1,6 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import OverviewPage from './pages/OverviewPage';
+import PeriodWizardPage from './pages/PeriodWizardPage';
 import PlansPage from './pages/PlansPage';
 import PlanWizardPage from './pages/PlanWizardPage';
 import CatalogPage from './pages/CatalogPage';
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/resumo" replace />} />
         <Route path="/resumo" element={<OverviewPage />} />
         <Route path="/planejamentos" element={<PlansPage />} />
+        <Route path="/planejamentos/periodo" element={<PeriodWizardPage />} />
         <Route path="/planejamentos/:id" element={<PlanWizardPage />} />
         <Route path="/cadastros" element={<CatalogPage />} />
         <Route path="*" element={<Navigate to="/resumo" replace />} />

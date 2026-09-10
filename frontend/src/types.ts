@@ -40,6 +40,72 @@ export interface ExpenseSource {
   isActive: boolean;
 }
 
+export interface Goal {
+  id: number;
+  name: string;
+  targetAmount: number;
+  targetYear: number;
+  targetMonth: number;
+  targetLabel: string;
+  categoryId: number;
+  categoryName: string;
+  categoryColor: string;
+  isActive: boolean;
+  /** Soma de todos os aportes já lançados para a meta. */
+  contributedAmount: number;
+  remainingAmount: number;
+  progressPercent: number;
+  /** Meses até o prazo, contando o atual. Zero quando o prazo já passou. */
+  monthsRemaining: number;
+  suggestedMonthlyAmount: number;
+  isAchieved: boolean;
+  isLate: boolean;
+}
+
+export interface GoalInput {
+  name: string;
+  targetAmount: number;
+  targetYear: number;
+  targetMonth: number;
+  categoryId: number;
+  isActive?: boolean;
+}
+
+export interface PlannedGoal {
+  goalId: number;
+  goalName: string;
+  categoryId: number;
+  amount: number;
+  targetAmount: number;
+  targetLabel: string;
+  contributedAmount: number;
+  progressPercent: number;
+}
+
+/** Um mês já composto (padrão do período + ajustes daquele mês) pronto para gravar. */
+export interface BatchMonthPayload {
+  year: number;
+  month: number;
+  incomes: { incomeSourceId: number; amount: number }[];
+  allocations: { categoryId: number; percentage: number }[];
+  expenses: { expenseSourceId: number; amount: number }[];
+  goalContributions: { goalId: number; amount: number }[];
+}
+
+export interface ApplyPlanBatchResult {
+  updatedCount: number;
+  createdCount: number;
+  plans: PlanSummary[];
+}
+
+export interface CreatePlanRangeResult {
+  createdCount: number;
+  skippedCount: number;
+  created: PlanSummary[];
+  /** Meses do intervalo que já tinham planejamento e foram preservados. */
+  skippedMonths: string[];
+}
+
 export interface PlanSummary {
   id: number;
   year: number;
@@ -73,9 +139,13 @@ export interface CategoryBreakdown {
   color: string;
   percentage: number;
   budget: number;
+  /** Total comprometido: fontes de saída + aportes em metas. */
   plannedExpense: number;
+  /** Só a parte dos aportes em metas. */
+  plannedGoals: number;
   difference: number;
   expenses: PlannedExpense[];
+  goals: PlannedGoal[];
 }
 
 export interface MonthOverview {
@@ -86,7 +156,9 @@ export interface MonthOverview {
   planId: number | null;
   step: PlanStep | null;
   plannedIncome: number;
+  /** Já inclui os aportes em metas. */
   plannedExpense: number;
+  goalContribution: number;
   balance: number;
 }
 
@@ -111,8 +183,10 @@ export interface YearOverview {
   averageMonthlyBalance: number;
   highestExpenseMonthAmount: number;
   highestExpenseMonthName: string | null;
+  totalGoalContribution: number;
   months: MonthOverview[];
   categories: CategoryYearTotal[];
+  goals: Goal[];
 }
 
 export interface PlanDetail {
@@ -129,6 +203,7 @@ export interface PlanDetail {
   unallocatedPercentage: number;
   unallocatedAmount: number;
   totalPlannedExpense: number;
+  totalGoalContribution: number;
   balance: number;
   createdAt: string;
   updatedAt: string;

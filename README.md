@@ -102,7 +102,28 @@ dá para fechar o navegador e voltar depois de onde parou.
 3. **Gastos previstos** — com o gráfico confirmado, cada categoria vira um bloco
    com o **teto em reais** já calculado. Você lança o valor previsto de cada
    *fonte de saída* e uma barra mostra o quanto do teto já foi comprometido.
+   No mesmo bloco aparecem as **metas** daquela categoria, para direcionar quanto
+   daquele mês vai para cada uma.
 4. **Resumo** — totais do mês, orçamento x previsto por categoria e a sobra.
+
+### Metas
+
+Uma meta tem um **valor a atingir** e um **prazo (mês/ano)**, e pertence a uma
+categoria. Ela é cadastrada na aba **Metas** dos Cadastros e reaproveitada em
+todos os meses, como as fontes.
+
+O aporte é lançado mês a mês, na etapa 3, e **ocupa o teto da categoria da meta** —
+ou seja, guardar dinheiro concorre com gastar, que é o comportamento honesto: o
+dinheiro sai do orçamento do mês do mesmo jeito. Por isso o aporte entra no total
+de saídas previstas e reduz a sobra.
+
+O progresso é a **soma de todos os aportes já lançados**, em qualquer mês. A partir
+dele o app calcula quanto falta, quantos meses restam até o prazo e **quanto seria
+preciso guardar por mês** para chegar lá. Metas com prazo vencido e ainda não
+atingidas ficam marcadas em vermelho.
+
+Metas que já receberam aporte não são apagadas ao serem removidas: ficam inativas,
+para não quebrar o histórico dos meses.
 
 ### Resumo anual
 
@@ -113,24 +134,82 @@ com entradas x saídas mês a mês, a tabela dos 12 meses e o gasto por categori
 As médias dividem o total pelos meses que **já têm planejamento** — meses em branco não
 entram na conta, senão janeiro planejado sozinho pareceria um ano inteiro barato.
 
-Categorias e fontes são **reutilizáveis**: ficam salvas e aparecem em todos os
-meses. Dá para criar novas direto no meio do assistente ou na aba **Cadastros**.
-Ao criar um mês, o campo *Copiar de* traz entradas, distribuição e gastos
-previstos de outro mês já planejado.
+Categorias, fontes e metas são **reutilizáveis**: ficam salvas e aparecem em todos
+os meses. Dá para criar novas direto no meio do assistente ou na aba **Cadastros**.
+
+### Planejar um período
+
+No diálogo de novo planejamento existem dois modos. **Um mês** abre o assistente
+daquele mês, como sempre. **Intervalo de meses** abre o **assistente do período**:
+as mesmas 4 etapas, mas o que você preenche ali é o **padrão do período**.
+
+Acima do indicador de etapa há um seletor **Editando**, que alterna entre:
+
+- **Padrão do período** — vale para todos os meses do intervalo;
+- **cada mês do período** — abre aquele mês partindo do padrão, e o que você mudar
+  vale só para ele. O mês passa a aparecer como *ajustado* no seletor e deixa de
+  acompanhar mudanças posteriores no padrão (o botão *Voltar ao padrão* desfaz).
+
+Meses do intervalo que já têm planejamento aparecem como *já existe* e ficam de
+fora — nunca são sobrescritos.
+
+**Nada é gravado até o final.** Todo o período é um rascunho no navegador; os meses
+só são criados quando as três etapas de preenchimento do padrão estiverem completas
+(entradas, distribuição e gastos previstos). A etapa **Resumo** mostra essa lista de
+verificação e só libera o botão de gravar quando ela fecha. Aí os meses são criados
+de uma vez, já concluídos, e a partir daí são planejamentos independentes como
+qualquer outro — o "padrão" existiu apenas durante a criação.
+
+O intervalo é limitado a **36 meses por vez**, para um clique errado não gerar anos
+de dados.
+
+### Ver os planejamentos em lista
+
+A tela de Planejamentos tem dois modos, **Cards** e **Lista** (a escolha fica salva no
+navegador). Na lista, cada mês é uma linha com os totais, e o botão de expandir abre
+ali mesmo as entradas, o consumo de cada categoria e os aportes em metas — sem
+precisar abrir o assistente. O detalhe só é buscado na primeira vez que a linha abre.
+
+### Editar vários meses em conjunto
+
+Nos dois modos (Cards e Lista) cada mês tem uma caixa de seleção. Ao marcar um ou
+mais, aparece a barra **"Editar em conjunto"**, que abre o mesmo assistente do
+período — agora em modo de edição, só com os meses selecionados.
+
+Vale a mesma mecânica: o seletor **Editando** alterna entre o **padrão** (que vale
+para todos os meses marcados) e cada mês isolado. A diferença é o que acontece com
+o que já estava gravado:
+
+- o **padrão sobrescreve** todos os meses selecionados;
+- um mês que você abriu e ajustou **mantém o que foi definido nele** — o ajuste do
+  mês sempre ganha do padrão;
+- um mês que você não quer mexer basta não selecionar: ele não é tocado.
+
+Ao abrir, o padrão já vem semeado com os valores do primeiro mês selecionado, e
+cada mês guarda os próprios valores atuais — o botão **Manter os valores atuais**
+devolve o mês ao que está gravado hoje, e **Voltar ao padrão** o faz seguir o padrão
+de novo.
+
+Nada muda até confirmar: a etapa **Resumo** mostra a lista de verificação e a tabela
+**"O que será gravado"**, mês a mês, dizendo se ele vai receber o *padrão* ou o
+*ajuste do mês*. Só então o lote é aplicado (`PUT /plans/batch`), substituindo as
+quatro listas de cada mês de uma vez.
 
 ## Modelo de dados
 
 ```
 categories ──< expense_sources ──< planned_expenses >── monthly_plans
-     └────────< category_allocations >───────────────────────┘
+     ├────────< goals ──────────< goal_contributions >──────┤
+     └────────< category_allocations >───────────────────────┤
 income_sources ──< planned_incomes >───────────────────────────┘
 ```
 
 - `monthly_plans` — um por (ano, mês), com a etapa atual do assistente.
 - `category_allocations` — a porcentagem de cada categoria naquele mês.
 - `planned_incomes` / `planned_expenses` — os valores lançados no mês.
-- Fontes e categorias já usadas em algum mês não são apagadas: ficam inativas,
-  para não quebrar o histórico.
+- `goals` / `goal_contributions` — metas e quanto de cada mês foi direcionado a elas.
+- Fontes, categorias e metas já usadas em algum mês não são apagadas: ficam
+  inativas, para não quebrar o histórico.
 
 ## API
 
@@ -141,13 +220,17 @@ Base: `http://localhost:8080/api` (documentação completa no Swagger).
 | `GET/POST/PUT/DELETE` | `/categories` | Categorias de gasto |
 | `GET/POST/PUT/DELETE` | `/income-sources` | Fontes de entrada |
 | `GET/POST/PUT/DELETE` | `/expense-sources` | Fontes de saída (sempre em uma categoria) |
+| `GET/POST/PUT/DELETE` | `/goals` | Metas (valor, prazo e categoria), com progresso calculado |
 | `GET` | `/overview?year=` | Resumo do ano: totais, médias por mês, quebra por mês e por categoria (sem `year`, usa o ano mais recente com planejamento) |
 | `GET` | `/plans` | Lista os meses planejados |
 | `POST` | `/plans` | Inicia um mês (`year`, `month`, `copyFromPlanId?`) |
+| `POST` | `/plans/batch` | Cria de uma vez os meses de um período, cada um já composto pelo assistente (máx. 36; meses existentes são preservados) |
+| `PUT` | `/plans/batch` | Aplica um lote em meses que já existem (edição em conjunto): substitui as quatro listas de cada mês e cria o que faltar (máx. 36) |
 | `GET` | `/plans/{id}` | Detalhe com totais e orçamento por categoria |
 | `PUT` | `/plans/{id}/incomes` | Etapa 1 |
 | `PUT` | `/plans/{id}/allocations` | Etapa 2 (valida a soma ≤ 100%) |
-| `PUT` | `/plans/{id}/expenses` | Etapa 3 |
+| `PUT` | `/plans/{id}/expenses` | Etapa 3 — fontes de saída |
+| `PUT` | `/plans/{id}/goal-contributions` | Etapa 3 — aportes em metas |
 | `POST` | `/plans/{id}/step` | Avança/volta a etapa |
 
 Os três `PUT` substituem a lista inteira daquela etapa (valores zerados são
@@ -185,11 +268,18 @@ npm run dev
 
 O projeto sobe sem arquivos de migration: na inicialização a API cria o schema a
 partir do modelo do EF Core (`EnsureCreated`). Isso mantém o "clone e rode"
-simples, mas **não** aplica mudanças de modelo em um banco já criado.
+simples, mas `EnsureCreated` **não** toca em um banco que já existe.
 
-Quando quiser versionar o schema, basta gerar a primeira migration — a API
-detecta que existem migrations e passa a usar `Migrate()` automaticamente, sem
-mudança de código:
+Para não perder dados quando o modelo ganha uma tabela nova, existe
+`backend/src/ControleGastos.Api/Data/SchemaUpdates.cs`: um punhado de comandos
+`CREATE TABLE IF NOT EXISTS` rodados logo depois do `EnsureCreated`. Em banco novo
+não fazem nada; em banco antigo, completam o que falta sem mexer no que já está lá.
+Foi assim que as tabelas `goals` e `goal_contributions` chegaram a quem já tinha
+planejamentos — **não é preciso apagar o volume** para atualizar.
+
+Quando quiser versionar o schema de verdade, basta gerar a primeira migration — a
+API detecta que existem migrations e passa a usar `Migrate()` automaticamente, sem
+mudança de código (e aí o `SchemaUpdates.cs` pode ser apagado):
 
 ```bash
 cd backend
@@ -224,9 +314,9 @@ controle-gastos/
 │  └─ src/ControleGastos.Api/
 │     ├─ Program.cs            # bootstrap, schema, seed, Swagger
 │     ├─ Domain/               # entidades
-│     ├─ Data/                 # DbContext + seed
+│     ├─ Data/                 # DbContext, seed e SchemaUpdates
 │     ├─ Contracts/            # DTOs de entrada e saída
-│     ├─ Services/PlanService.cs   # regras do assistente
+│     ├─ Services/            # PlanService (assistente) e GoalService (metas)
 │     └─ Controllers/
 └─ frontend/
    ├─ Dockerfile
@@ -234,6 +324,6 @@ controle-gastos/
    └─ src/
       ├─ api/client.ts
       ├─ components/          # DonutChart, MonthlyBars, inputs, modal
-      ├─ pages/               # resumo anual, lista, assistente, cadastros
-      └─ utils/               # formatação pt-BR e paleta
+      ├─ pages/               # resumo anual, lista, assistentes (mês e período), cadastros
+      └─ utils/               # formatação pt-BR, paleta e composição do rascunho
 ```

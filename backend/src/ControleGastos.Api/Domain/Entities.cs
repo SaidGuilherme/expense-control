@@ -54,6 +54,41 @@ public class ExpenseSource
     public ICollection<PlannedExpense> PlannedExpenses { get; set; } = new List<PlannedExpense>();
 }
 
+/// <summary>
+/// Objetivo com valor a atingir e prazo (mês/ano). O aporte é lançado mês a mês
+/// e ocupa o teto da categoria à qual a meta pertence.
+/// </summary>
+public class Goal
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Valor que se quer alcançar.</summary>
+    public decimal TargetAmount { get; set; }
+
+    public int TargetYear { get; set; }
+    public int TargetMonth { get; set; }
+
+    public int CategoryId { get; set; }
+    public Category? Category { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<GoalContribution> Contributions { get; set; } = new List<GoalContribution>();
+}
+
+/// <summary>Quanto de um mês foi direcionado para uma meta.</summary>
+public class GoalContribution
+{
+    public int Id { get; set; }
+    public int MonthlyPlanId { get; set; }
+    public MonthlyPlan? MonthlyPlan { get; set; }
+    public int GoalId { get; set; }
+    public Goal? Goal { get; set; }
+    public decimal Amount { get; set; }
+}
+
 /// <summary>Planejamento de um mês específico.</summary>
 public class MonthlyPlan
 {
@@ -68,6 +103,7 @@ public class MonthlyPlan
     public ICollection<PlannedIncome> Incomes { get; set; } = new List<PlannedIncome>();
     public ICollection<CategoryAllocation> Allocations { get; set; } = new List<CategoryAllocation>();
     public ICollection<PlannedExpense> Expenses { get; set; } = new List<PlannedExpense>();
+    public ICollection<GoalContribution> GoalContributions { get; set; } = new List<GoalContribution>();
 }
 
 /// <summary>Valor planejado de entrada de uma fonte dentro de um mês.</summary>
