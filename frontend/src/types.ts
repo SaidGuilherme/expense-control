@@ -78,6 +78,43 @@ export interface CategoryBreakdown {
   expenses: PlannedExpense[];
 }
 
+export interface MonthOverview {
+  month: number;
+  monthName: string;
+  shortName: string;
+  hasPlan: boolean;
+  planId: number | null;
+  step: PlanStep | null;
+  plannedIncome: number;
+  plannedExpense: number;
+  balance: number;
+}
+
+export interface CategoryYearTotal {
+  categoryId: number;
+  categoryName: string;
+  color: string;
+  plannedExpense: number;
+  shareOfExpense: number;
+  monthlyAverage: number;
+}
+
+export interface YearOverview {
+  year: number;
+  availableYears: number[];
+  plannedMonths: number;
+  totalIncome: number;
+  totalExpense: number;
+  totalBalance: number;
+  averageMonthlyIncome: number;
+  averageMonthlyExpense: number;
+  averageMonthlyBalance: number;
+  highestExpenseMonthAmount: number;
+  highestExpenseMonthName: string | null;
+  months: MonthOverview[];
+  categories: CategoryYearTotal[];
+}
+
 export interface PlanDetail {
   id: number;
   year: number;

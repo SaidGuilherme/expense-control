@@ -3,7 +3,8 @@ import type {
   ExpenseSource,
   IncomeSource,
   PlanDetail,
-  PlanSummary
+  PlanSummary,
+  YearOverview
 } from '../types';
 
 /**
@@ -81,6 +82,12 @@ export const api = {
     update: (id: number, input: { name: string; categoryId: number; isActive?: boolean }) =>
       request<ExpenseSource>(`/expense-sources/${id}`, { method: 'PUT', body: body(input) }),
     remove: (id: number) => request<void>(`/expense-sources/${id}`, { method: 'DELETE' })
+  },
+
+  // ---------- resumo anual ----------
+  overview: {
+    get: (year?: number) =>
+      request<YearOverview>(`/overview${year ? `?year=${year}` : ''}`)
   },
 
   // ---------- planejamento mensal ----------

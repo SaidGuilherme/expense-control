@@ -104,6 +104,15 @@ dá para fechar o navegador e voltar depois de onde parou.
    *fonte de saída* e uma barra mostra o quanto do teto já foi comprometido.
 4. **Resumo** — totais do mês, orçamento x previsto por categoria e a sobra.
 
+### Resumo anual
+
+A aba **Resumo anual** (tela inicial) junta todos os meses de um ano: quanto está
+previsto entrar e sair **no ano inteiro** e a **média por mês**, um gráfico de barras
+com entradas x saídas mês a mês, a tabela dos 12 meses e o gasto por categoria no ano.
+
+As médias dividem o total pelos meses que **já têm planejamento** — meses em branco não
+entram na conta, senão janeiro planejado sozinho pareceria um ano inteiro barato.
+
 Categorias e fontes são **reutilizáveis**: ficam salvas e aparecem em todos os
 meses. Dá para criar novas direto no meio do assistente ou na aba **Cadastros**.
 Ao criar um mês, o campo *Copiar de* traz entradas, distribuição e gastos
@@ -132,6 +141,7 @@ Base: `http://localhost:8080/api` (documentação completa no Swagger).
 | `GET/POST/PUT/DELETE` | `/categories` | Categorias de gasto |
 | `GET/POST/PUT/DELETE` | `/income-sources` | Fontes de entrada |
 | `GET/POST/PUT/DELETE` | `/expense-sources` | Fontes de saída (sempre em uma categoria) |
+| `GET` | `/overview?year=` | Resumo do ano: totais, médias por mês, quebra por mês e por categoria (sem `year`, usa o ano mais recente com planejamento) |
 | `GET` | `/plans` | Lista os meses planejados |
 | `POST` | `/plans` | Inicia um mês (`year`, `month`, `copyFromPlanId?`) |
 | `GET` | `/plans/{id}` | Detalhe com totais e orçamento por categoria |
@@ -223,7 +233,7 @@ controle-gastos/
    ├─ nginx.conf              # SPA + proxy /api
    └─ src/
       ├─ api/client.ts
-      ├─ components/          # DonutChart, inputs, modal
-      ├─ pages/               # lista, assistente, cadastros
+      ├─ components/          # DonutChart, MonthlyBars, inputs, modal
+      ├─ pages/               # resumo anual, lista, assistente, cadastros
       └─ utils/               # formatação pt-BR e paleta
 ```

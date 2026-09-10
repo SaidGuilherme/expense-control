@@ -15,6 +15,25 @@ export const formatMoney = (value: number): string => currency.format(Number.isF
 export const formatMoneyInput = (value: number): string =>
   value === 0 ? '' : decimal.format(value);
 
+/**
+ * Versão curta para eixos de gráfico: "8,7 mil", "1,2 mi".
+ * Em eixo o símbolo atrapalha (força quebra de linha no tick), então ele é
+ * opcional — a legenda e o tooltip já deixam a unidade clara.
+ */
+export function formatMoneyCompact(value: number, withSymbol = true): string {
+  const safe = Number.isFinite(value) ? value : 0;
+  const abs = Math.abs(safe);
+  const prefix = `${safe < 0 ? '-' : ''}${withSymbol ? 'R$ ' : ''}`;
+
+  if (abs >= 1_000_000) {
+    return `${prefix}${(abs / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
+  }
+  if (abs >= 1_000) {
+    return `${prefix}${(abs / 1_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+  }
+  return `${prefix}${abs.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
+}
+
 export const formatPercent = (value: number): string =>
   `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
 

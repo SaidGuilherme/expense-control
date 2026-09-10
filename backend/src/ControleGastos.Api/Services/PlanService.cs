@@ -15,6 +15,12 @@ public class PlanService(AppDbContext db)
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
     ];
 
+    private static readonly string[] ShortMonthNames =
+    [
+        "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+        "Jul", "Ago", "Set", "Out", "Nov", "Dez"
+    ];
+
     /// <summary>Tolerância para comparação de porcentagens (evita ruído de arredondamento).</summary>
     private const decimal PercentTolerance = 0.01m;
 
@@ -52,6 +58,111 @@ public class PlanService(AppDbContext db)
     {
         var plan = await LoadAsync(planId, tracking: false, ct);
         return await BuildDetailAsync(plan, ct);
+    }
+
+    /// <summary>
+    /// Consolida um ano: total previsto de entrada e de saída, a média por mês
+    /// (contando só os meses já planejados) e a quebra mês a mês e por categoria.
+    /// </summary>
+    public async Task<YearOverviewDto> GetYearOverviewAsync(int? year, CancellationToken ct)
+    {
+        var availableYears = await db.MonthlyPlans
+            .AsNoTracking()
+            .Select(p => p.Year)
+            .Distinct()
+            .OrderByDescending(y => y)
+            .ToListAsync(ct);
+
+        // Sem ano pedido: o mais recente que tem planejamento; se não há nenhum, o ano corrente.
+        var targetYear = year ?? (availableYears.Count > 0 ? availableYears[0] : DateTime.UtcNow.Year);
+
+        if (!availableYears.Contains(targetYear))
+            availableYears = availableYears.Append(targetYear).OrderByDescending(y => y).ToList();
+
+        var plans = await db.MonthlyPlans
+            .AsNoTracking()
+            .Include(p => p.Incomes)
+            .Include(p => p.Expenses)
+            .Where(p => p.Year == targetYear)
+            .ToListAsync(ct);
+
+        var months = new List<MonthOverviewDto>(12);
+        for (var month = 1; month <= 12; month++)
+        {
+            var plan = plans.FirstOrDefault(p => p.Month == month);
+
+            if (plan is null)
+            {
+                months.Add(new MonthOverviewDto(
+                    month, MonthNames[month - 1], ShortMonthNames[month - 1],
+                    false, null, null, 0m, 0m, 0m));
+                continue;
+            }
+
+            var income = plan.Incomes.Sum(i => i.Amount);
+            var expense = plan.Expenses.Sum(e => e.Amount);
+
+            months.Add(new MonthOverviewDto(
+                month, MonthNames[month - 1], ShortMonthNames[month - 1],
+                true, plan.Id, plan.Step, income, expense, income - expense));
+        }
+
+        var plannedMonths = months.Where(m => m.HasPlan).ToList();
+        var totalIncome = plannedMonths.Sum(m => m.PlannedIncome);
+        var totalExpense = plannedMonths.Sum(m => m.PlannedExpense);
+        var count = plannedMonths.Count;
+
+        decimal PerMonth(decimal total) =>
+            count == 0 ? 0m : Math.Round(total / count, 2, MidpointRounding.AwayFromZero);
+
+        var expenseSources = await db.ExpenseSources.AsNoTracking().ToDictionaryAsync(s => s.Id, ct);
+        var categories = await db.Categories.AsNoTracking().ToDictionaryAsync(c => c.Id, ct);
+
+        var categoryTotals = plans
+            .SelectMany(p => p.Expenses)
+            .Select(e => new
+            {
+                e.Amount,
+                CategoryId = expenseSources.GetValueOrDefault(e.ExpenseSourceId)?.CategoryId ?? 0
+            })
+            .Where(x => x.CategoryId != 0)
+            .GroupBy(x => x.CategoryId)
+            .Select(group =>
+            {
+                var category = categories.GetValueOrDefault(group.Key);
+                var total = group.Sum(x => x.Amount);
+
+                return new CategoryYearTotalDto(
+                    group.Key,
+                    category?.Name ?? "(categoria removida)",
+                    category?.Color ?? "#898781",
+                    total,
+                    totalExpense == 0m ? 0m : Math.Round(total / totalExpense * 100m, 2, MidpointRounding.AwayFromZero),
+                    PerMonth(total));
+            })
+            .OrderByDescending(c => c.PlannedExpense)
+            .ThenBy(c => c.CategoryName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var peak = plannedMonths
+            .Where(m => m.PlannedExpense > 0)
+            .OrderByDescending(m => m.PlannedExpense)
+            .FirstOrDefault();
+
+        return new YearOverviewDto(
+            targetYear,
+            availableYears,
+            count,
+            totalIncome,
+            totalExpense,
+            totalIncome - totalExpense,
+            PerMonth(totalIncome),
+            PerMonth(totalExpense),
+            PerMonth(totalIncome - totalExpense),
+            peak?.PlannedExpense ?? 0m,
+            peak?.MonthName,
+            months,
+            categoryTotals);
     }
 
     // ------------------------------------------------------------------
